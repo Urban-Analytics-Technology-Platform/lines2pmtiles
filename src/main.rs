@@ -6,10 +6,11 @@ use geo::algorithm::bounding_rect::BoundingRect;
 use geo::algorithm::map_coords::MapCoordsInPlace;
 use geo_types::Geometry;
 use geojson::FeatureReader;
-use indicatif::{HumanBytes, HumanCount, ProgressBar, ProgressStyle};
+use indicatif::{HumanBytes, HumanCount, MultiProgress, ProgressBar, ProgressStyle};
 use mvt::{GeomEncoder, GeomType, MapGrid, Tile, TileId};
-use pmtiles2::{util::tile_id, Compression, PMTiles, TileType};
+use pmtiles2::{util::tile_id as get_tile_id, Compression, PMTiles, TileType};
 use pointy::Transform;
+use rayon::prelude::*;
 use rstar::{primitives::CachedEnvelope, RTree, RTreeObject, AABB};
 use serde_json::Value;
 
@@ -55,7 +56,6 @@ impl TreeFeature {
 
 fn load_features(
     reader: FeatureReader<BufReader<File>>,
-    options: &Options,
 ) -> Result<(RTree<CachedEnvelope<TreeFeature>>, usize, BBox)> {
     // Note we calculate a bbox from WGS84 features instead of using the rtree's envelope. The
     // rtree is in web mercator space, making it harder to calculate the tiles covered
@@ -105,7 +105,7 @@ fn geojson_to_pmtiles(
     reader: FeatureReader<BufReader<File>>,
     options: Options,
 ) -> Result<PMTilesFile> {
-    let (r_tree, feature_count, bbox) = load_features(reader, &options)?;
+    let (r_tree, feature_count, bbox) = load_features(reader)?;
 
     println!(
         "bbox of {} features: {:?}",
@@ -140,34 +140,57 @@ fn geojson_to_pmtiles(
 
     let map_grid = MapGrid::default();
 
+    let mut tiles_to_calculate = Vec::new();
+
     for z in &options.zoom_levels {
         let z = *z;
         let (x1, y1, x2, y2) = bbox.to_tiles(z);
         for x in x1..=x2 {
             for y in y1..=y2 {
-                let tile_id = TileId::new(x, y, z)?;
-                let tbounds = map_grid.tile_bbox(tile_id);
-                let features = r_tree.locate_in_envelope_intersecting(&AABB::from_corners(
-                    [tbounds.x_min(), tbounds.y_min()],
-                    [tbounds.x_max(), tbounds.y_max()],
-                ));
-                // TODO And figure out clipping
-                make_tile(tile_id, &mut pmtiles, features.collect(), &options)?;
+                tiles_to_calculate.push(TileId::new(x, y, z)?);
             }
         }
     }
 
+    let multi_progress = MultiProgress::new();
+    let tiles: Vec<(TileId, Tile)> = tiles_to_calculate
+        .into_par_iter()
+        .flat_map(|tile_id| {
+            let tbounds = map_grid.tile_bbox(tile_id);
+            let features = r_tree.locate_in_envelope_intersecting(&AABB::from_corners(
+                [tbounds.x_min(), tbounds.y_min()],
+                [tbounds.x_max(), tbounds.y_max()],
+            ));
+            // TODO And figure out clipping
+            // TODO Plumb the result
+            make_tile(
+                tile_id,
+                features.collect(),
+                &options,
+                multi_progress.clone(),
+            )
+            .unwrap()
+        })
+        .collect();
+
+    // Assemble the final thing
+    for (tile_id, tile) in tiles {
+        pmtiles.add_tile(
+            get_tile_id(tile_id.z() as u8, tile_id.x() as u64, tile_id.y() as u64),
+            tile.to_bytes()?,
+        );
+    }
     Ok(pmtiles)
 }
 
 fn make_tile(
     current_tile_id: TileId,
-    pmtiles: &mut PMTilesFile,
     mut features: Vec<&CachedEnvelope<TreeFeature>>,
     options: &Options,
-) -> Result<()> {
+    multi_progress: MultiProgress,
+) -> Result<Option<(TileId, Tile)>> {
     // Start this early to capture the time taken to sort
-    let progress = progress_bar_for_count(features.len());
+    let progress = multi_progress.add(progress_bar_for_count(features.len()));
 
     // We have to do this to each result from RTree, because order is of course not maintained
     // between internal buckets
@@ -270,11 +293,12 @@ fn make_tile(
     let num_features = layer.num_features();
     if num_features == 0 {
         // Nothing fit in this tile, just skip it!
-        return Ok(());
+        return Ok(None);
     }
 
     tile.add_layer(layer)?;
-    println!(
+    progress.set_style(ProgressStyle::with_template("[{elapsed_precise}] {msg}").unwrap());
+    progress.finish_with_message(format!(
         "Added {} features into {}, costing {}{}",
         HumanCount(num_features as u64),
         current_tile_id,
@@ -285,18 +309,9 @@ fn make_tile(
         } else {
             ""
         }
-    );
+    ));
 
-    pmtiles.add_tile(
-        tile_id(
-            current_tile_id.z() as u8,
-            current_tile_id.x() as u64,
-            current_tile_id.y() as u64,
-        ),
-        tile.to_bytes()?,
-    );
-
-    Ok(())
+    Ok(Some((current_tile_id, tile)))
 }
 
 fn progress_bar_for_count(count: usize) -> ProgressBar {
