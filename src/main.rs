@@ -6,6 +6,7 @@ use geo::algorithm::bounding_rect::BoundingRect;
 use geo::algorithm::map_coords::MapCoordsInPlace;
 use geo_types::Geometry;
 use geojson::FeatureReader;
+use indicatif::{HumanBytes, HumanCount, ProgressBar, ProgressStyle};
 use mvt::{GeomEncoder, GeomType, MapGrid, Tile, TileId};
 use pmtiles2::{util::tile_id, Compression, PMTiles, TileType};
 use pointy::Transform;
@@ -85,6 +86,7 @@ fn main() -> Result<()> {
 
     let reader = FeatureReader::from_reader(BufReader::new(File::open(&args[1])?));
     let pmtiles = geojson_to_pmtiles(reader, options)?;
+    println!("Writing out.pmtiles");
     let mut file = File::create("out.pmtiles")?;
     pmtiles.to_writer(&mut file)?;
     Ok(())
@@ -107,7 +109,11 @@ fn geojson_to_pmtiles(
         root_envelope.upper()[1],
     );
 
-    println!("bbox of {} features: {:?}", feature_count, bbox);
+    println!(
+        "bbox of {} features: {:?}",
+        HumanCount(feature_count as u64),
+        bbox
+    );
 
     let mut pmtiles = PMTiles::new(TileType::Mvt, Compression::None);
     // TODO Include fields, if they're actually needed?
@@ -161,6 +167,9 @@ fn make_tile(
     mut features: Vec<&CachedEnvelope<TreeFeature>>,
     options: &Options,
 ) -> Result<()> {
+    // Start this early to capture the time taken to sort
+    let progress = progress_bar_for_count(features.len());
+
     // We have to do this to each result from RTree, because order is of course not maintained
     // between internal buckets
     if let Some(ref key) = options.sort_by_key {
@@ -177,6 +186,7 @@ fn make_tile(
     let mut bytes_so_far = 0;
     let mut skipped = false;
     for feature in features {
+        progress.inc(1);
         let mut b = GeomEncoder::new(GeomType::Linestring, Transform::default());
 
         let mut any = false;
@@ -219,6 +229,7 @@ fn make_tile(
         if let Some(limit) = options.limit_size_bytes {
             if bytes_so_far > limit {
                 skipped = true;
+                progress.finish();
                 break;
             }
         }
@@ -265,11 +276,11 @@ fn make_tile(
 
     tile.add_layer(layer)?;
     println!(
-        "Added {} features into {}, costing {} bytes{}",
-        num_features,
+        "Added {} features into {}, costing {}{}",
+        HumanCount(num_features as u64),
         current_tile_id,
         // TODO Maybe this is slow and we should use to_bytes() once
-        tile.compute_size(),
+        HumanBytes(tile.compute_size() as u64),
         if skipped {
             " (skipping some features after hitting size limit)"
         } else {
@@ -287,4 +298,9 @@ fn make_tile(
     );
 
     Ok(())
+}
+
+fn progress_bar_for_count(count: usize) -> ProgressBar {
+    ProgressBar::new(count as u64).with_style(ProgressStyle::with_template(
+        "[{elapsed_precise}] [{wide_bar:.cyan/blue}] {human_pos}/{human_len} ({per_sec}, {eta})").unwrap())
 }
