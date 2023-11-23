@@ -27,15 +27,6 @@ pub struct BBox {
 }
 
 impl BBox {
-    pub fn new(min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64) -> Self {
-        Self {
-            min_lon,
-            min_lat,
-            max_lon,
-            max_lat,
-        }
-    }
-
     pub fn empty() -> Self {
         Self {
             min_lon: f64::MAX,
@@ -55,17 +46,6 @@ impl BBox {
                     self.max_lat = self.max_lat.max(pt[1]);
                 }
             }
-        }
-    }
-
-    pub fn from_tile(tile_x: u32, tile_y: u32, zoom: u32) -> Self {
-        let (min_lon, min_lat) = tile_to_lon_lat(tile_x, tile_y, zoom);
-        let (max_lon, max_lat) = tile_to_lon_lat(tile_x + 1, tile_y + 1, zoom);
-        BBox {
-            min_lon,
-            min_lat,
-            max_lon,
-            max_lat,
         }
     }
 
@@ -96,12 +76,4 @@ fn lon_lat_to_tile(lon: f64, lat: f64, zoom: u32) -> (u32, u32) {
         (x * num_tiles).floor() as u32,
         (y * num_tiles).floor() as u32,
     )
-}
-
-// From https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames
-fn tile_to_lon_lat(tile_x: u32, tile_y: u32, zoom: u32) -> (f64, f64) {
-    let n = f64::consts::PI - 2.0 * f64::consts::PI * (tile_y as f64) / (zoom as f64).exp2();
-    let lon = (tile_x as f64) / (zoom as f64).exp2() * 360.0 - 180.0;
-    let lat = 180.0 / f64::consts::PI * (0.5 * (n.exp() - (-n).exp())).atan();
-    (lon, lat)
 }
