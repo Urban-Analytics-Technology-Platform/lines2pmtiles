@@ -10,5 +10,3 @@ This is an experimental Rust crate to convert GeoJSON LineStrings to PMTiles. Th
 - Explore if parallelism can help performance
 
 The output is not correct yet; do not use this in production.
-
-Note the first commits are lost in <https://github.com/Urban-Analytics-Technology-Platform/od2net/tree/tippecanwho>
