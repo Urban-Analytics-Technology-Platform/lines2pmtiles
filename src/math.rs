@@ -35,29 +35,27 @@ impl BBox {
             max_lat,
         }
     }
-    pub fn from_geojson(features: &Vec<Feature>) -> Self {
-        // TODO Convert to geo and just use something there?
-        let mut bbox = BBox {
+
+    pub fn empty() -> Self {
+        Self {
             min_lon: f64::MAX,
             max_lon: f64::MIN,
             min_lat: f64::MAX,
             max_lat: f64::MIN,
-        };
+        }
+    }
 
-        for f in features {
-            if let Some(ref geometry) = f.geometry {
-                if let Value::LineString(ref line_string) = geometry.value {
-                    for pt in line_string {
-                        bbox.min_lon = bbox.min_lon.min(pt[0]);
-                        bbox.min_lat = bbox.min_lat.min(pt[1]);
-                        bbox.max_lon = bbox.max_lon.max(pt[0]);
-                        bbox.max_lat = bbox.max_lat.max(pt[1]);
-                    }
+    pub fn add(&mut self, f: &Feature) {
+        if let Some(ref geometry) = f.geometry {
+            if let Value::LineString(ref line_string) = geometry.value {
+                for pt in line_string {
+                    self.min_lon = self.min_lon.min(pt[0]);
+                    self.min_lat = self.min_lat.min(pt[1]);
+                    self.max_lon = self.max_lon.max(pt[0]);
+                    self.max_lat = self.max_lat.max(pt[1]);
                 }
             }
         }
-
-        bbox
     }
 
     pub fn from_tile(tile_x: u32, tile_y: u32, zoom: u32) -> Self {

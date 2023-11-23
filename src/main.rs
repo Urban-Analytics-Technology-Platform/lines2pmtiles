@@ -13,6 +13,8 @@ use pointy::Transform;
 use rstar::{primitives::CachedEnvelope, RTree, RTreeObject, AABB};
 use serde_json::Value;
 
+use self::math::BBox;
+
 mod math;
 
 struct TreeFeature {
@@ -54,14 +56,19 @@ impl TreeFeature {
 fn load_features(
     reader: FeatureReader<BufReader<File>>,
     options: &Options,
-) -> Result<(RTree<CachedEnvelope<TreeFeature>>, usize)> {
-    let tree_features: Vec<CachedEnvelope<TreeFeature>> = reader
-        .features()
-        .map(|f| CachedEnvelope::new(f.unwrap().into()))
-        .collect();
+) -> Result<(RTree<CachedEnvelope<TreeFeature>>, usize, BBox)> {
+    // Note we calculate a bbox from WGS84 features instead of using the rtree's envelope. The
+    // rtree is in web mercator space, making it harder to calculate the tiles covered
+    let mut bbox = BBox::empty();
+    let mut tree_features = Vec::new();
+    for f in reader.features() {
+        let f = f?;
+        bbox.add(&f);
+        tree_features.push(CachedEnvelope::new(f.into()));
+    }
     let num_features = tree_features.len();
     let tree = RTree::bulk_load(tree_features);
-    Ok((tree, num_features))
+    Ok((tree, num_features, bbox))
 }
 
 struct Options {
@@ -98,16 +105,7 @@ fn geojson_to_pmtiles(
     reader: FeatureReader<BufReader<File>>,
     options: Options,
 ) -> Result<PMTilesFile> {
-    let (r_tree, feature_count) = load_features(reader, &options)?;
-
-    let root_envelope = r_tree.root().envelope();
-
-    let bbox = math::BBox::new(
-        root_envelope.lower()[0],
-        root_envelope.lower()[1],
-        root_envelope.upper()[0],
-        root_envelope.upper()[1],
-    );
+    let (r_tree, feature_count, bbox) = load_features(reader, &options)?;
 
     println!(
         "bbox of {} features: {:?}",
@@ -144,8 +142,9 @@ fn geojson_to_pmtiles(
 
     for z in &options.zoom_levels {
         let z = *z;
-        for x in 0..2u32.pow(z) {
-            for y in 0..2u32.pow(z) {
+        let (x1, y1, x2, y2) = bbox.to_tiles(z);
+        for x in x1..=x2 {
+            for y in y1..=y2 {
                 let tile_id = TileId::new(x, y, z)?;
                 let tbounds = map_grid.tile_bbox(tile_id);
                 let features = r_tree.locate_in_envelope_intersecting(&AABB::from_corners(
