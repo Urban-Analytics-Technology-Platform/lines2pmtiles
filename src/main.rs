@@ -10,6 +10,7 @@ use mvt::{GeomEncoder, GeomType, MapGrid, Tile, TileId};
 use pmtiles2::{util::tile_id, Compression, PMTiles, TileType};
 use pointy::Transform;
 use rstar::{primitives::CachedEnvelope, RTree, RTreeObject, AABB};
+use serde_json::Value;
 
 mod math;
 
@@ -109,6 +110,7 @@ fn geojson_to_pmtiles(
     println!("bbox of {} features: {:?}", feature_count, bbox);
 
     let mut pmtiles = PMTiles::new(TileType::Mvt, Compression::None);
+    // TODO Include fields, if they're actually needed?
     pmtiles.meta_data = Some(serde_json::json!(
         {
             "antimeridian_adjusted_bounds":"-180,-90,180,90",
@@ -116,10 +118,7 @@ fn geojson_to_pmtiles(
             {
                 "id": "layer1",
                 "minzoom": 0,
-                "maxzoom": 15,
-                "fields": {
-                    "key": "String"
-                }
+                "maxzoom": 15
             }
             ]
         }
@@ -229,8 +228,32 @@ fn make_tile(
         // encoded
         let mut write_feature = layer.into_feature(encoded);
         write_feature.set_id(id);
-        // TODO actual things
-        write_feature.add_tag_string("key", "value");
+
+        if let Some(ref props) = feature.properties {
+            for (key, value) in props {
+                match value {
+                    Value::Null => {}
+                    Value::Bool(x) => write_feature.add_tag_bool(key, *x),
+                    Value::Number(x) => {
+                        // TODO Other variations, and maybe use float?
+                        if let Some(x) = x.as_f64() {
+                            write_feature.add_tag_double(key, x);
+                        }
+                    }
+                    Value::String(x) => write_feature.add_tag_string(key, x),
+                    // Encode other cases as strings, like tippecanoe. Note this is probably bad in
+                    // the input; unless the possible cases for arrays and objects are small, it'll
+                    // take lots to encode these
+                    Value::Array(x) => {
+                        write_feature.add_tag_string(key, &serde_json::to_string(&x)?)
+                    }
+                    Value::Object(x) => {
+                        write_feature.add_tag_string(key, &serde_json::to_string(&x)?)
+                    }
+                }
+            }
+        }
+
         layer = write_feature.into_layer();
     }
 
