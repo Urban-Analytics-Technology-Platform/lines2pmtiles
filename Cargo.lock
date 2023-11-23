@@ -491,6 +491,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ec2a862134d2a7d32d7983ddcdd1c4923530833c9f2ea1a44fc5fa473989058"
 
 [[package]]
+name = "lines2pmtiles"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fs-err",
+ "geo",
+ "geo-types",
+ "geojson",
+ "indicatif",
+ "mvt",
+ "pmtiles2",
+ "pointy",
+ "rayon",
+ "rstar 0.11.0",
+ "serde_json",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -860,24 +878,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.39",
-]
-
-[[package]]
-name = "tippe"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "fs-err",
- "geo",
- "geo-types",
- "geojson",
- "indicatif",
- "mvt",
- "pmtiles2",
- "pointy",
- "rayon",
- "rstar 0.11.0",
- "serde_json",
 ]
 
 [[package]]
