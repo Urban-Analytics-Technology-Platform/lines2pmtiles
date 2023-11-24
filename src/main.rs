@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{BufReader, Cursor};
 
 use anyhow::Result;
@@ -56,22 +57,37 @@ impl TreeFeature {
 
 fn load_features(
     reader: FeatureReader<BufReader<File>>,
-) -> Result<(RTree<CachedEnvelope<TreeFeature>>, usize, BBox)> {
+) -> Result<(
+    RTree<CachedEnvelope<TreeFeature>>,
+    usize,
+    BBox,
+    HashMap<String, String>,
+)> {
     // Note we calculate a bbox from WGS84 features instead of using the rtree's envelope. The
     // rtree is in web mercator space, making it harder to calculate the tiles covered
     let mut bbox = BBox::empty();
     let mut tree_features = Vec::new();
+    let mut fields = HashMap::new();
     for f in reader.features() {
         let f = f?;
         bbox.add(&f);
+
+        if let Some(ref props) = f.properties {
+            for (key, _value) in props {
+                // TODO Give a real description based on the JSON value type?
+                fields.entry(key.to_string()).or_insert_with(String::new);
+            }
+        }
+
         tree_features.push(CachedEnvelope::new(f.into()));
     }
     let num_features = tree_features.len();
     let tree = RTree::bulk_load(tree_features);
-    Ok((tree, num_features, bbox))
+    Ok((tree, num_features, bbox, fields))
 }
 
 struct Options {
+    layer_name: String,
     // Descending
     sort_by_key: Option<String>,
     zoom_levels: Vec<u32>,
@@ -85,6 +101,7 @@ fn main() -> Result<()> {
     }
 
     let options = Options {
+        layer_name: "layer1".to_string(),
         sort_by_key: Some("count".to_string()),
         zoom_levels: (0..13).collect(),
         // This is so much less than 500KB, but the final tile size is still big
@@ -105,7 +122,7 @@ fn geojson_to_pmtiles(
     reader: FeatureReader<BufReader<File>>,
     options: Options,
 ) -> Result<PMTilesFile> {
-    let (r_tree, feature_count, bbox) = load_features(reader)?;
+    let (r_tree, feature_count, bbox, fields) = load_features(reader)?;
 
     println!(
         "bbox of {} features: {:?}",
@@ -114,29 +131,24 @@ fn geojson_to_pmtiles(
     );
 
     let mut pmtiles = PMTiles::new(TileType::Mvt, Compression::None);
-    // TODO Include fields, if they're actually needed?
+    pmtiles.min_longitude = bbox.min_lon;
+    pmtiles.min_latitude = bbox.min_lat;
+    pmtiles.max_longitude = bbox.max_lon;
+    pmtiles.max_latitude = bbox.max_lat;
+    pmtiles.min_zoom = options.zoom_levels[0] as u8;
+    pmtiles.max_zoom = *options.zoom_levels.last().unwrap() as u8;
     pmtiles.meta_data = Some(serde_json::json!(
         {
-            "antimeridian_adjusted_bounds":"-180,-90,180,90",
             "vector_layers": [
-            {
-                "id": "layer1",
-                "minzoom": 0,
-                "maxzoom": 15
-            }
+                {
+                    "id": options.layer_name,
+                    "minzoom": pmtiles.min_zoom,
+                    "maxzoom": pmtiles.max_zoom,
+                    "fields": fields,
+                }
             ]
         }
     ));
-    // TODO Calculate from bbox and other things
-    pmtiles.min_latitude = -90.0;
-    pmtiles.min_longitude = -180.0;
-    pmtiles.max_latitude = 90.0;
-    pmtiles.max_longitude = 180.0;
-    pmtiles.min_zoom = options.zoom_levels[0] as u8;
-    pmtiles.max_zoom = *options.zoom_levels.last().unwrap() as u8;
-    pmtiles.center_zoom = 7;
-    pmtiles.center_longitude = -1.1425781;
-    pmtiles.center_latitude = 53.904306;
 
     let map_grid = MapGrid::default();
 
@@ -203,7 +215,7 @@ fn make_tile(
     let transform = web_mercator_transform.tile_transform(current_tile_id);
     let mut tile = Tile::new(4096);
 
-    let mut layer = tile.create_layer("layer1");
+    let mut layer = tile.create_layer(&options.layer_name);
 
     let mut bytes_so_far = 0;
     let mut skipped = false;

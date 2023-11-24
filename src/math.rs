@@ -20,10 +20,10 @@ pub fn wgs84_to_web_mercator(c: [f64; 2]) -> [f64; 2] {
 
 #[derive(Debug)]
 pub struct BBox {
-    min_lon: f64,
-    min_lat: f64,
-    max_lon: f64,
-    max_lat: f64,
+    pub min_lon: f64,
+    pub min_lat: f64,
+    pub max_lon: f64,
+    pub max_lat: f64,
 }
 
 impl BBox {
