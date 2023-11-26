@@ -20,6 +20,7 @@ mod math;
 
 pub struct Options {
     pub layer_name: String,
+    pub description: Option<String>,
     /// Descending
     pub sort_by_key: Option<String>,
     pub zoom_levels: Vec<u32>,
@@ -46,7 +47,7 @@ pub fn geojson_to_pmtiles<R: Read>(
     pmtiles.max_latitude = bbox.max_lat;
     pmtiles.min_zoom = options.zoom_levels[0] as u8;
     pmtiles.max_zoom = *options.zoom_levels.last().unwrap() as u8;
-    pmtiles.meta_data = Some(serde_json::json!(
+    let mut metadata = serde_json::json!(
         {
             "vector_layers": [
                 {
@@ -57,7 +58,14 @@ pub fn geojson_to_pmtiles<R: Read>(
                 }
             ]
         }
-    ));
+    );
+    if let Some(description) = options.description.clone() {
+        metadata
+            .as_object_mut()
+            .unwrap()
+            .insert("description".to_string(), description.into());
+    }
+    pmtiles.meta_data = Some(metadata);
 
     let map_grid = MapGrid::default();
 

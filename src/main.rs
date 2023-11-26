@@ -12,6 +12,7 @@ fn main() -> Result<()> {
     // TODO use clap
     let options = lines2pmtiles::Options {
         layer_name: "layer1".to_string(),
+        description: None,
         sort_by_key: Some("count".to_string()),
         zoom_levels: (0..13).collect(),
         // This is so much less than 500KB, but the final tile size is still big
