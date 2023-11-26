@@ -36,15 +36,23 @@ impl BBox {
         }
     }
 
+    fn add_point(&mut self, pt: &geojson::Position) {
+        self.min_lon = self.min_lon.min(pt[0]);
+        self.min_lat = self.min_lat.min(pt[1]);
+        self.max_lon = self.max_lon.max(pt[0]);
+        self.max_lat = self.max_lat.max(pt[1]);
+    }
+
     pub fn add(&mut self, f: &Feature) {
         if let Some(ref geometry) = f.geometry {
-            if let Value::LineString(ref line_string) = geometry.value {
-                for pt in line_string {
-                    self.min_lon = self.min_lon.min(pt[0]);
-                    self.min_lat = self.min_lat.min(pt[1]);
-                    self.max_lon = self.max_lon.max(pt[0]);
-                    self.max_lat = self.max_lat.max(pt[1]);
+            match geometry.value {
+                Value::Point(ref pt) => self.add_point(pt),
+                Value::LineString(ref line_string) => {
+                    for pt in line_string {
+                        self.add_point(pt);
+                    }
                 }
+                _ => {}
             }
         }
     }

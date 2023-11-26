@@ -205,13 +205,19 @@ fn make_tile(
     let mut skipped = false;
     for feature in features {
         progress.inc(1);
-        let mut b = GeomEncoder::new(GeomType::Linestring, Transform::default());
 
+        let geom_type = match feature.geometry {
+            Geometry::Point(_) => GeomType::Point,
+            Geometry::LineString(_) => GeomType::Linestring,
+            _ => continue,
+        };
+        let mut b = GeomEncoder::new(geom_type, Transform::default());
         let mut any = false;
-        if let Geometry::LineString(ref line_string) = feature.geometry {
-            for pt in line_string {
-                // Transform to mercator
-                // let mercator_pt = math::wgs84_to_web_mercator([pt[0], pt[1]]);
+
+        // TODO Refactor
+        match feature.geometry {
+            Geometry::Point(pt) => {
+                let pt = geo_types::Coord::from(pt);
                 // Transform to 0-1 tile coords (not sure why this doesnt work with passing the
                 // transform through)
                 let transformed_pt = transform * (pt.x, pt.y);
@@ -226,10 +232,30 @@ fn make_tile(
                     any = true;
                 }
 
-                //println!("{:?} becomes {:?} and then {:?}", pt, mercator_pt, transformed_pt);
                 // Same as extent
                 b = b.point(transformed_pt.x * 4096.0, transformed_pt.y * 4096.0)?;
             }
+            Geometry::LineString(ref line_string) => {
+                for pt in line_string {
+                    // Transform to 0-1 tile coords (not sure why this doesnt work with passing the
+                    // transform through)
+                    let transformed_pt = transform * (pt.x, pt.y);
+
+                    // If any part of the LineString is within this tile, keep the whole thing. No
+                    // clipping yet.
+                    if transformed_pt.x >= 0.0
+                        && transformed_pt.x <= 1.0
+                        && transformed_pt.y >= 0.0
+                        && transformed_pt.y <= 1.0
+                    {
+                        any = true;
+                    }
+
+                    // Same as extent
+                    b = b.point(transformed_pt.x * 4096.0, transformed_pt.y * 4096.0)?;
+                }
+            }
+            _ => continue,
         }
 
         if !any {
